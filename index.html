@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Puzzle Dead Defense</title>
+    <meta name="description" content="Defenda a base encaixando gemas. Puzzle e cerco no mesmo campo." />
+    <meta name="theme-color" content="#12140f" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #12140f;
+        --surface: #1c2118;
+        --fg: #e6e1d6;
+        --muted: #9a937f;
+        --accent: #e2a43a;
+        --danger: #8f2d2d;
+        --line: #34392e;
+        --red: #e23b3b;
+        --green: #3cb85a;
+        --blue: #3a6fe0;
+        --yellow: #e2c43a;
+        --display: "Barlow Condensed", "Arial Narrow", sans-serif;
+        --sans: "Barlow", "Segoe UI", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--sans);
+        line-height: 1.5;
+      }
+      button { font: inherit; color: inherit; cursor: pointer; }
+      .page {
+        width: min(32rem, 100%);
+        margin: 0 auto;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+      header, .row { display: flex; align-items: flex-end; justify-content: space-between; gap: 0.75rem; }
+      .kicker {
+        margin: 0;
+        font-family: var(--display);
+        font-size: 0.75rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      h1 {
+        margin: 0;
+        font-family: var(--display);
+        font-size: 2.5rem;
+        line-height: 0.9;
+        font-weight: 700;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+      }
+      @media (min-width: 640px) {
+        .stats { grid-template-columns: repeat(4, 1fr); }
+      }
+      .stat, .card, .pad button, .icon-btn, .text-btn {
+        border: 1px solid var(--line);
+        background: var(--surface);
+        border-radius: 0.5rem;
+      }
+      .stat { padding: 0.5rem 0.75rem; }
+      .stat p, .hint { margin: 0; color: var(--muted); }
+      .stat p {
+        font-family: var(--display);
+        font-size: 0.75rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+      .stat strong, .stat span.num {
+        display: block;
+        margin-top: 0.25rem;
+        font-family: var(--display);
+        font-size: 1.125rem;
+        font-weight: 700;
+        line-height: 1.2;
+        color: var(--fg);
+      }
+      .meter {
+        display: block;
+        height: 0.25rem;
+        margin-top: 0.5rem;
+        overflow: hidden;
+        border-radius: 2px;
+        background: var(--line);
+      }
+      .meter i {
+        display: block;
+        height: 100%;
+        width: 100%;
+        transform-origin: left center;
+        background: var(--danger);
+      }
+      .meter.amber i { background: var(--accent); }
+      .stage { position: relative; }
+      canvas {
+        display: block;
+        width: 100%;
+        height: auto;
+        aspect-ratio: 420 / 548;
+        border: 1px solid var(--line);
+        border-radius: 0.5rem;
+        background: var(--bg);
+        touch-action: none;
+      }
+      #overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        padding: 0.75rem;
+        background: color-mix(in srgb, var(--bg) 92%, transparent);
+        border-radius: 0.5rem;
+      }
+      #overlay[hidden] { display: none; }
+      .card { padding: 1rem; overflow: auto; }
+      .card h2 {
+        margin: 0 0 0.75rem;
+        font-family: var(--display);
+        font-size: 1.875rem;
+        line-height: 1;
+      }
+      .card p { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.875rem; }
+      .swatches {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+        margin: 0 0 0.75rem;
+        padding: 0;
+        list-style: none;
+        font-size: 0.875rem;
+      }
+      .swatches li { display: flex; gap: 0.5rem; align-items: center; }
+      .swatch { width: 1rem; height: 1rem; border-radius: 2px; flex: none; }
+      .swatch.red { background: var(--red); }
+      .swatch.green { background: var(--green); }
+      .swatch.blue { background: var(--blue); }
+      .swatch.yellow { background: var(--yellow); }
+      .swatches small { display: block; color: var(--muted); font-size: 0.75rem; }
+      #action {
+        margin-top: 0.75rem;
+        min-height: 2.75rem;
+        border: 0;
+        border-radius: 0.5rem;
+        background: var(--accent);
+        color: var(--bg);
+        font-family: var(--display);
+        font-size: 1.125rem;
+        font-weight: 700;
+      }
+      .icon-btn, .text-btn, .pad button {
+        min-height: 2.75rem;
+        background: var(--surface);
+      }
+      .icon-btn { width: 2.75rem; }
+      .text-btn { padding: 0 0.75rem; font-family: var(--display); }
+      .pad {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 0.5rem;
+      }
+      .pad button {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.15rem;
+        touch-action: none;
+        user-select: none;
+        font-family: var(--display);
+        font-size: 0.75rem;
+      }
+      .pad button b { font-size: 1.1rem; line-height: 1; }
+      .hint { font-size: 0.875rem; }
+      button[hidden] { display: none; }
+      @media (min-width: 768px) {
+        .pad { display: none; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .meter i { transition: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <div>
+          <p class="kicker">HTML5</p>
+          <h1>Puzzle Dead</h1>
+        </div>
+        <button id="mute" class="icon-btn" type="button" aria-label="Silenciar">Som</button>
+      </header>
+
+      <section class="stats" aria-label="Painel">
+        <div class="stat">
+          <p>Base</p>
+          <strong id="hp">10</strong>
+          <span class="meter"><i id="hp-bar"></i></span>
+        </div>
+        <div class="stat">
+          <p>Pontos</p>
+          <span class="num" id="score">0</span>
+          <span class="hint">Recorde <span id="best">0</span></span>
+        </div>
+        <div class="stat">
+          <p>Especial</p>
+          <strong id="diamond">Diamante em 30</strong>
+        </div>
+        <div class="stat">
+          <p>Foguete</p>
+          <strong id="red">0/5</strong>
+          <span class="meter amber"><i id="red-bar" style="transform: scaleX(0)"></i></span>
+        </div>
+      </section>
+
+      <div class="stage">
+        <canvas id="field" width="420" height="548" aria-label="Campo de defesa">
+          Seu navegador precisa de canvas para jogar.
+        </canvas>
+        <div id="overlay">
+          <div class="card">
+            <h2 id="overlay-title">Segure a linha</h2>
+            <div id="rules">
+              <p>
+                Grupos de 4 estouram. O anel claro estoura a partir de 2. O diamante, a cada 30 torres,
+                apaga a cor em que encostar. Cinco vermelhas armam um foguete.
+              </p>
+              <ul class="swatches">
+                <li><span class="swatch red"></span><span>Barra<small>vermelha vira foguete</small></span></li>
+                <li><span class="swatch green"></span><span>Cruz<small>grupo comum</small></span></li>
+                <li><span class="swatch blue"></span><span>Círculo<small>grupo comum</small></span></li>
+                <li><span class="swatch yellow"></span><span>Triângulo<small>grupo comum</small></span></li>
+              </ul>
+              <p>
+                O atirador é o alvo prioritário. O tanque tira 3 de vida. O sabotador só suja o tabuleiro se chegar na base.
+              </p>
+            </div>
+            <p id="overlay-body"></p>
+          </div>
+          <button id="action" type="button">Entrar na defesa</button>
+        </div>
+      </div>
+
+      <div class="pad">
+        <button type="button" data-hold="left" aria-label="Esquerda"><b>←</b>Esq</button>
+        <button type="button" data-hold="right" aria-label="Direita"><b>→</b>Dir</button>
+        <button type="button" data-tap="rotate" aria-label="Girar"><b>⟳</b>Girar</button>
+        <button type="button" data-hold="soft" aria-label="Acelerar queda"><b>↓</b>Desce</button>
+        <button type="button" data-tap="hard" aria-label="Queda imediata"><b>⤓</b>Cai</button>
+      </div>
+
+      <div class="row">
+        <p class="hint">Setas ou A D movem. Cima, Z ou X gira. Baixo acelera. Espaço solta. Esc pausa.</p>
+        <button id="pause" class="text-btn" type="button" hidden>Pausa</button>
+      </div>
+    </main>
+    <script src="game.js"></script>
+  </body>
+</html>
