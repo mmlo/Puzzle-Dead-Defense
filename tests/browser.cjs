@@ -16,8 +16,16 @@ const server = http.createServer((req,res) => {
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const browser = await chromium.launch({headless:true, executablePath:process.env.CHROME_BIN || undefined});
   try {
-    for (const device of [{name:'desktop',width:1280,height:1000,touch:false},{name:'phone',width:390,height:844,touch:true},{name:'tablet',width:900,height:1100,touch:true}]) {
-      const context=await browser.newContext({viewport:{width:device.width,height:device.height},hasTouch:device.touch});
+    for (const device of [
+      {name:'desktop',width:1920,height:1080,touch:false},
+      {name:'notebook',width:1366,height:650,touch:false},
+      {name:'notebook-short',width:1280,height:600,touch:false},
+      {name:'phone',width:390,height:844,touch:true},
+      {name:'phone-small',width:320,height:568,touch:true},
+      {name:'phone-landscape',width:844,height:390,touch:true},
+      {name:'tablet',width:900,height:1100,touch:true}
+    ]) {
+      const context=await browser.newContext({viewport:{width:device.width,height:device.height},hasTouch:device.touch,deviceScaleFactor:device.touch?2:1.25});
       const page=await context.newPage(); const errors=[];
       page.on('pageerror',e=>errors.push(e.message));
       await page.goto(`http://127.0.0.1:${server.address().port}`);
@@ -44,7 +52,22 @@ const server = http.createServer((req,res) => {
         assert.ok(pad.y+pad.height<=device.height, 'Touch controls must fit without scrolling');
       }
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight+1),true, `${device.name}: page must fit vertically`);
+      for(const selector of ['header','.stats','.powers','.preview-row','#field','#pause',...(device.touch?['.pad']:[])]) {
+        const box=await page.locator(selector).boundingBox();
+        assert.ok(box.y>=0 && box.y+box.height<=device.height+1,`${device.name}: ${selector} clipped`);
+      }
+      const field=await page.locator('#field').boundingBox();
+      assert.ok(Math.abs(field.width/field.height-420/548)<.005,'Canvas proportions must remain unchanged');
       await page.screenshot({path:`/tmp/pdd-${device.name}.png`,fullPage:true});
+      if(device.name==='notebook') {
+        await page.setViewportSize({width:1093,height:520});
+        await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight+1),true);
+        const resized=await page.locator('#field').boundingBox();
+        assert.ok(resized.y+resized.height<=520 && resized.width<field.width);
+        await page.setViewportSize({width:device.width,height:device.height});
+      }
       for(let i=0;i<60 && await page.locator('#overlay').isHidden();i++) {
         await page.keyboard.press('Space');
         await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));

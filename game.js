@@ -1643,6 +1643,14 @@
 	const canvas = document.querySelector("#field");
 	const ctx = canvas?.getContext("2d");
 	if (!canvas || !ctx) throw new Error("Canvas #field ausente em index.html");
+	const stage = canvas.parentElement;
+	const arena = stage.parentElement;
+	new ResizeObserver(([entry]) => {
+		const { width, height } = entry.contentRect;
+		const scale = Math.max(0, Math.min(width / 420, height / 548));
+		stage.style.width = `${420 * scale}px`;
+		stage.style.height = `${548 * scale}px`;
+	}).observe(arena);
 	const input = new Input();
 	const sim = createSim(Math.random() * 1e9 | 0);
 	const hpEl = must("#hp");
@@ -1799,13 +1807,13 @@
 	let last = performance.now();
 	const loop = (now) => {
 		const dpr = Math.min(window.devicePixelRatio || 1, 2);
-		const width = Math.floor(420 * dpr);
-		const height = Math.floor(548 * dpr);
+		const width = Math.max(1, Math.round(canvas.clientWidth * dpr));
+		const height = Math.max(1, Math.round(canvas.clientHeight * dpr));
 		if (canvas.width !== width || canvas.height !== height) {
 			canvas.width = width;
 			canvas.height = height;
 		}
-		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+		ctx.setTransform(width / 420, 0, 0, height / 548, 0, 0);
 		const dt = Math.min(.1, (now - last) / 1e3);
 		last = now;
 		const actions = input.sample();

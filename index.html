@@ -203,27 +203,75 @@
       .actions { display: flex; flex-wrap: wrap; gap: .5rem; }
       .actions button { min-height: 2.75rem; }
       button:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
-      @media (max-width: 600px) {
-        .page { padding: .5rem; gap: .35rem; }
+      @media (prefers-reduced-motion: reduce) {
+        .meter i { transition: none; }
+      }
+      /* The arena receives the remaining viewport height; HUD never scrolls away. */
+      .page {
+        width: min(70rem, 100%); height: 100vh; height: 100dvh;
+        display: grid; grid-template-columns: 17rem minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr) auto auto;
+        grid-template-areas: "header header" "sidebar arena" "sidebar pad" "sidebar footer";
+        gap: .75rem; padding: .75rem;
+      }
+      header { grid-area: header; align-items: center; }
+      .sidebar { grid-area: sidebar; min-height: 0; display: flex; flex-direction: column; gap: .75rem; overflow-y: auto; }
+      .sidebar .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .sidebar .powers { grid-template-columns: 1fr; }
+      .sidebar .powers .stat { display: grid; grid-template-columns: 1fr auto; align-items: center; }
+      .sidebar .powers small { grid-column: 1 / -1; }
+      .preview-row { gap: .5rem; }
+      .preview-row > div:first-child { flex: 1; min-width: 0; }
+      #notice { min-height: 0; font-size: .85rem; }
+      .arena { grid-area: arena; min-width: 0; min-height: 0; display: grid; place-items: center; }
+      .stage { margin: 0; min-width: 0; max-width: 100%; aspect-ratio: 420 / 548; }
+      canvas { width: 100%; height: 100%; }
+      .pad { grid-area: pad; }
+      .controls-footer { grid-area: footer; align-items: center; }
+      .controls-footer .hint { font-size: .75rem; }
+      #overlay { justify-content: center; gap: .5rem; }
+      #overlay .card { min-height: 0; flex: 0 1 auto; }
+      #action { flex-shrink: 0; margin: 0; }
+      .actions { flex-shrink: 0; }
+      .actions:has(button:not([hidden])) { padding-bottom: .15rem; }
+      @media (max-width: 699px) and (orientation: portrait) {
+        .page { width: 100%; padding: .4rem; gap: .35rem; grid-template-columns: minmax(0, 1fr);
+          grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+          grid-template-areas: "header" "sidebar" "arena" "pad" "footer"; }
+        h1 { font-size: 1.5rem; }
         .kicker { display: none; }
-        h1 { font-size: 1.7rem; }
-        .stats { grid-template-columns: repeat(4, 1fr); gap: .3rem; }
-        .stat { padding: .35rem; }
-        .stat p { font-size: .62rem; letter-spacing: .04em; }
-        .stat strong, .stat span.num { font-size: .9rem; }
-        .stat .hint, .stat small { font-size: .68rem; }
-        .powers .stat { padding: .35rem; }
-        #notice { min-height: 2em; font-size: .75rem; }
-        #next span { width: 1rem; height: 1rem; line-height: 1rem; font-size: .75rem; }
-        .preview-row small, #wave { font-size: .75rem; }
-        .stage { width: min(100%, calc((100svh - 330px) * .7664)); min-width: 200px; margin-inline: auto; }
-        .row > .hint { font-size: .7rem; }
+        .sidebar { overflow: visible; gap: .3rem; }
+        .sidebar .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .sidebar .powers { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .3rem; }
+        .sidebar .powers .stat { display: block; }
+        .stat, .sidebar .powers .stat { padding: .25rem .35rem; }
+        .stat p { font-size: .6rem; letter-spacing: .02em; }
+        .stat strong, .stat span.num { font-size: .85rem; }
+        .stat small, .stat .hint { font-size: .65rem; }
+        .preview-row { align-items: center; }
+        #notice { font-size: .7rem; line-height: 1.2; }
+        #next { flex-direction: row; }
+        #next span { width: 1rem; height: 1rem; line-height: 1rem; }
+        .preview-row small, #wave { font-size: .7rem; }
+        .controls-footer .hint { font-size: .65rem; line-height: 1.2; }
         .pad { gap: .3rem; }
         .pad button { font-size: .65rem; }
         .card { padding: .65rem; }
       }
-      @media (prefers-reduced-motion: reduce) {
-        .meter i { transition: none; }
+      @media (max-height: 600px) and (orientation: landscape) {
+        .page { grid-template-columns: 13rem minmax(0, 1fr); gap: .35rem; padding: .35rem; }
+        .kicker { display: none; }
+        h1 { font-size: 1.4rem; }
+        .sidebar { gap: .3rem; }
+        .stat, .sidebar .powers .stat { padding: .2rem .4rem; }
+        .stat p { font-size: .65rem; }
+        .stat strong, .stat span.num { font-size: .85rem; margin-top: 0; }
+        .stat small, .stat .hint, #notice { font-size: .65rem; }
+        .sidebar .powers { gap: .3rem; }
+        .sidebar .stat { line-height: 1.15; }
+        #notice { line-height: 1.15; }
+        #next { flex-direction: row; }
+        #next span { width: 1rem; height: 1rem; line-height: 1rem; }
       }
     </style>
   </head>
@@ -237,6 +285,7 @@
         <button id="mute" class="icon-btn" type="button" aria-label="Silenciar">Som</button>
       </header>
 
+      <aside class="sidebar" aria-label="Estado da partida">
       <section class="stats" aria-label="Painel">
         <div class="stat">
           <p>Base</p>
@@ -269,6 +318,8 @@
         <div><small>Próxima</small><div id="next" aria-label="Próxima torre"></div></div>
       </div>
 
+      </aside>
+      <div class="arena">
       <div class="stage">
         <canvas id="field" width="420" height="548" aria-label="Campo de defesa">
           Seu navegador precisa de canvas para jogar.
@@ -307,6 +358,7 @@
           </div>
         </div>
       </div>
+      </div>
 
       <div class="pad">
         <button type="button" data-hold="left" aria-label="Esquerda"><b>←</b>Esq</button>
@@ -316,7 +368,7 @@
         <button type="button" data-tap="hard" aria-label="Queda imediata"><b>⤓</b>Cai</button>
       </div>
 
-      <div class="row">
+      <div class="row controls-footer">
         <p class="hint">Setas ou A D movem. Cima, Z ou X gira. Baixo acelera. Espaço solta. Esc pausa.</p>
         <button id="pause" class="text-btn" type="button" hidden>Pausa</button>
       </div>

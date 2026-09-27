@@ -19,3 +19,9 @@ Os valores são uma primeira versão calibrável. Não há alegação de duraç�
 Não foram adicionados chefes, novas cores, árvore de upgrades ou escolha de melhorias entre ondas: eram possibilidades futuras condicionadas à estabilização, não recomendações para esta primeira implementação. Não se acrescentou mira teleguiada ou reserva de dano de salvas anteriores sem métricas que justifiquem essa complexidade.
 
 Os fontes TypeScript e o build original não estão disponíveis no checkout. Foi mantido o JavaScript existente com configuração extraída e ponto de entrada testável; não foi inventado um processo de compilação. O relatório original continua sendo um retrato da versão anterior.
+
+## Correção de layout por altura de janela
+
+O layout anterior empilhava indicadores e campo, excedendo a altura útil de notebooks. Agora a página usa a altura dinâmica da janela: painel lateral no desktop/paisagem, indicadores compactos no celular em pé e campo dimensionado no espaço restante por ResizeObserver. A proporção lógica 420×548 permanece; a resolução de desenho acompanha o tamanho exibido e a densidade de pixels (até 2×). Menus longos têm rolagem interna, sem deslocar o jogo inteiro.
+
+A verificação de navegador cobre 1920×1080, 1366×650, 1280×600, 390×844, 320×568, 844×390 e 900×1100. Verifica limites verticais e horizontais, visibilidade dos indicadores/campo/pausa/toque e proporção do canvas, além dos fluxos existentes. Redimensionamento durante a partida também é exercitado. São viewports emulados; aparelhos físicos não foram testados.
