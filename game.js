@@ -1,4 +1,5 @@
 (function() {
+	const BALANCE = typeof module !== "undefined" && module.exports ? require("./balance.js") : globalThis.PDD_BALANCE;
 	//#region src/game/config.ts
 	const Color = {
 		Red: 1,
@@ -53,12 +54,10 @@
 		saboteur: "#e07a2f"
 	};
 	const SPAWN_START = 1.8;
-	const SPAWN_MIN = .4;
-	const SPAWN_STEP = .01;
 	const CRASH_BASE = .2;
 	const CRASH_BONUS = .15;
 	const STEP = 1 / 60;
-	const SAVE_KEY = "pdd-save-v1";
+	const SAVE_KEY = "pdd-save-v2";
 	function crashChance(spawnInterval) {
 		const t = 1 - spawnInterval / SPAWN_START;
 		return CRASH_BASE + Math.min(1, Math.max(0, t)) * CRASH_BONUS;
@@ -295,6 +294,7 @@
 		};
 		clear = () => {
 			this.keys.clear();
+			for (const name of Object.keys(this.edges)) this.edges[name] = false;
 			this.holds.left = false;
 			this.holds.right = false;
 			this.holds.soft = false;
@@ -385,8 +385,16 @@
 			alive: true
 		};
 	}
-	function pickZombieKind(rng) {
-		return pickWeighted(rng, ZOMBIE_KIND, SPAWN_WEIGHTS);
+	function pickZombieKind(sim) {
+		const shooters = sim.zombies.filter(z => z.alive && z.kind === "shooter").length;
+		const unlock = { normal: 1, runner: 2, tank: 3, shooter: 4, saboteur: 5 };
+		const weights = SPAWN_WEIGHTS.map((weight, i) => {
+			const kind = ZOMBIE_KIND[i];
+			return sim.wave >= unlock[kind] && BALANCE.threatCost[kind] <= sim.waveBudget &&
+				(kind !== "shooter" || shooters < (sim.wave < 6 ? 1 : 2)) ? weight : 0;
+		});
+		const eligible = ZOMBIE_KIND.filter((_, i) => weights[i] > 0);
+		return eligible.length ? pickWeighted(sim.enemyRng, eligible, weights.filter(w => w > 0)) : null;
 	}
 	function spreadFor(distance, rng) {
 		if (distance > 280) return rng.int(-18, 18);
@@ -760,14 +768,16 @@
 		}
 		let count = 0;
 		let reds = 0;
+		const colors = [0, 0, 0, 0, 0, 0];
 		for (let i = 0; i < n; i++) {
 			if (!clearMask[i]) continue;
 			count++;
+			colors[cells[i].color]++;
 			if (cells[i]?.color === Color.Red) reds++;
 		}
 		return {
 			count,
-			reds
+			reds, colors
 		};
 	}
 	/**
@@ -781,12 +791,14 @@
 		let cleared = 0;
 		let reds = 0;
 		let score = 0;
+		const colors = [0, 0, 0, 0, 0, 0];
 		for (let step = 0; step < 20; step++) {
 			const found = findClears(board);
 			if (found.count === 0) break;
 			chain++;
 			score += found.count * 10 * chain;
 			reds += found.reds;
+			found.colors.forEach((n, color) => colors[color] += n);
 			cleared += found.count;
 			for (let i = 0; i < board.cells.length; i++) if (board.clearMask[i]) board.cells[i] = null;
 			compactAll(board);
@@ -795,7 +807,7 @@
 			chain,
 			cleared,
 			reds,
-			score
+			score, colors
 		};
 	}
 	/** Junk never lands in the active tower's column, and never as a crash or diamond. */
@@ -829,10 +841,10 @@
 	}
 	//#endregion
 	//#region src/game/storage.ts
-	function readBest() {
+	function readBest(mode = "standard") {
 		if (typeof localStorage === "undefined") return 0;
 		try {
-			const raw = localStorage.getItem(SAVE_KEY);
+			const raw = localStorage.getItem(`${SAVE_KEY}-${mode}`);
 			if (!raw) return 0;
 			const parsed = JSON.parse(raw);
 			if (parsed.version !== 1 || typeof parsed.best !== "number" || !Number.isFinite(parsed.best)) return 0;
@@ -841,14 +853,14 @@
 			return 0;
 		}
 	}
-	function writeBest(best) {
+	function writeBest(best, mode = "standard") {
 		if (typeof localStorage === "undefined") return;
 		try {
 			const save = {
 				version: 1,
 				best: Math.max(0, Math.floor(best))
 			};
-			localStorage.setItem(SAVE_KEY, JSON.stringify(save));
+			localStorage.setItem(`${SAVE_KEY}-${mode}`, JSON.stringify(save));
 		} catch {}
 	}
 	//#endregion
@@ -859,15 +871,38 @@
 	function noteScore(sim, amount) {
 		if (amount <= 0) return;
 		sim.score += amount;
+		if (sim.tutorial) return;
 		if (sim.score > sim.best) {
 			sim.best = sim.score;
-			writeBest(sim.best);
+			writeBest(sim.best, sim.mode);
 		}
 	}
 	function blankRun(sim, seed, best) {
 		sim.phase = "title";
 		sim.seed = seed >>> 0;
 		sim.rng = mulberry32(sim.seed);
+		sim.enemyRng = mulberry32(sim.seed ^ 0x9e3779b9);
+		sim.aimRng = mulberry32(sim.seed ^ 0x85ebca6b);
+		sim.junkRng = mulberry32(sim.seed ^ 0xc2b2ae35);
+		sim.mode = sim.mode || "standard";
+		sim.profile = BALANCE.profiles[sim.mode];
+		sim.shield = sim.profile.initialShield;
+		sim.blueMeter = sim.greenMeter = sim.yellowMeter = 0;
+		sim.suppression = sim.shieldFlash = 0;
+		sim.wave = 1;
+		sim.waveTime = sim.rest = 0;
+		sim.waveBudget = 14;
+		sim.healsThisWave = 0;
+		sim.nextGems = null;
+		sim.tutorial = false;
+		sim.endReason = null;
+		sim.notice = "Onda 1 · forme grupos de 4 para defender a base";
+		sim.noticeUntil = 6;
+		sim.stats = { damage: {}, blocked: 0, healed: 0, cleared: 0, fired: 0, hits: 0,
+			intercepted: 0, rocketsIntercepted: 0, maxShooters: 0, maxChain: 0, maxOccupancy: 0 };
+		sim.trace = [];
+		sim.traceTruncated = false;
+		sim.steps = 0;
 		sim.time = 0;
 		sim.acc = 0;
 		sim.board = createBoard();
@@ -876,13 +911,13 @@
 		sim.dasMs = 0;
 		sim.dasRepeating = false;
 		sim.fallMs = 0;
-		sim.hp = 10;
+		sim.hp = BALANCE.maxHp;
 		sim.score = 0;
 		sim.best = best;
 		sim.towersSpawned = 0;
 		sim.redMeter = 0;
 		sim.spawnTimer = .35;
-		sim.spawnInterval = SPAWN_START;
+		sim.spawnInterval = sim.profile.startInterval;
 		sim.nextId = 1;
 		sim.zombies = [];
 		sim.bullets = [];
@@ -899,28 +934,40 @@
 		blankRun(sim, seed, best);
 		return sim;
 	}
-	function startGame(sim, seed = Math.random() * 1e9 | 0) {
-		blankRun(sim, seed, Math.max(sim.best, sim.score));
+	function startGame(sim, seed = Math.random() * 1e9 | 0, mode = sim.mode) {
+		const best = mode === sim.mode && !sim.tutorial ? sim.best : readBest(mode);
+		sim.mode = BALANCE.profiles[mode] ? mode : "standard";
+		blankRun(sim, seed, best);
 		sim.phase = "playing";
 		if (!spawnTower(sim)) endGame(sim);
 	}
-	function endGame(sim) {
+	function endGame(sim, reason = "board") {
 		if (sim.phase === "over") return;
 		sim.phase = "over";
+		sim.endReason = reason;
 		sim.active = null;
-		if (sim.score > sim.best) {
+		if (!sim.tutorial && sim.score > sim.best) {
 			sim.best = sim.score;
-			writeBest(sim.best);
+			writeBest(sim.best, sim.mode);
 		}
 		pushSfx(sim, "over");
 	}
-	function hurt(sim, amount) {
+	function hurt(sim, amount, source = "contact") {
 		if (sim.phase !== "playing") return true;
+		if (source === "shooter" && sim.shield > 0) {
+			sim.shield--;
+			sim.shieldFlash = 1;
+			sim.stats.blocked++;
+			announce(sim, "Escudo bloqueou um disparo");
+			return false;
+		}
+		sim.stats.damage[source] = (sim.stats.damage[source] || 0) + Math.min(sim.hp, amount);
+		announce(sim, source === "shooter" ? "Base atingida por disparo" : `Base atingida: ${enemyLabel(source)}`);
 		sim.hp = Math.max(0, sim.hp - amount);
 		sim.shake = Math.min(1, sim.shake + .5);
 		pushSfx(sim, "hurt");
 		if (sim.hp <= 0) {
-			endGame(sim);
+			endGame(sim, "base");
 			return true;
 		}
 		return false;
@@ -939,11 +986,12 @@
 	}
 	function spawnTower(sim) {
 		sim.towersSpawned += 1;
-		const diamond = sim.towersSpawned % 30 === 0;
 		const x = 5;
-		const cells = Array.from({ length: 3 }, (_, i) => ({
+		const gems = sim.nextGems || makeTowerGems(sim, sim.towersSpawned);
+		sim.nextGems = makeTowerGems(sim, sim.towersSpawned + 1);
+		const cells = gems.map((gem, i) => ({
 			y: -1 - i,
-			gem: makeGem(sim, diamond && i === 0)
+			gem
 		}));
 		const tower = {
 			x,
@@ -959,6 +1007,25 @@
 		sim.active = tower;
 		sim.fallMs = 0;
 		return true;
+	}
+	function makeTowerGems(sim, number) {
+		return Array.from({ length: 3 }, (_, i) => makeGem(sim, number % 30 === 0 && i === 0));
+	}
+	function enemyLabel(kind) {
+		return ({ normal: "normal", runner: "corredor", tank: "tanque", shooter: "atirador", saboteur: "sabotador" })[kind] || kind;
+	}
+	function announce(sim, message) {
+		sim.notice = message;
+		sim.noticeUntil = sim.time + 4;
+	}
+	function startTutorial(sim) {
+		startGame(sim, 42, "standard");
+		sim.tutorial = true;
+		sim.shield = 0;
+		for (let y = 11; y < 14; y++) sim.board.cells[y * 10 + 5] = { color: Color.Blue, crash: false, diamond: false };
+		sim.active.cells.forEach(cell => cell.gem = { color: Color.Blue, crash: false, diamond: false });
+		announce(sim, "Treino: pressione Espaço ou Cai para juntar as azuis na coluna marcada.");
+		sim.noticeUntil = Infinity;
 	}
 	function blockedAboveWell(board, tower) {
 		const dropped = tower.cells.map((cell) => ({ y: cell.y + 1 }));
@@ -1006,10 +1073,30 @@
 	}
 	function awardCascade(sim, cascade) {
 		if (cascade.cleared <= 0) return;
+		const colors = cascade.colors || [0, cascade.reds, 0, 0, 0, 0];
+		sim.stats.cleared += cascade.cleared;
+		sim.stats.maxChain = Math.max(sim.stats.maxChain, cascade.chain);
+		// At most one bonus energy per resolution, even for very long chains.
+		sim.blueMeter += colors[Color.Blue] + (cascade.chain > 1 ? 1 : 0);
+		sim.shield = Math.min(BALANCE.shieldCap, sim.shield + Math.floor(sim.blueMeter / BALANCE.shieldCost));
+		sim.blueMeter = sim.shield === BALANCE.shieldCap ? 0 : sim.blueMeter % BALANCE.shieldCost;
+		sim.greenMeter += colors[Color.Green];
+		const heals = Math.min(Math.floor(sim.greenMeter / BALANCE.healCost), BALANCE.maxHp - sim.hp,
+			BALANCE.healsPerWave - sim.healsThisWave);
+		sim.hp += heals;
+		sim.stats.healed += heals;
+		sim.healsThisWave += heals;
+		sim.greenMeter = sim.hp === BALANCE.maxHp || sim.healsThisWave === BALANCE.healsPerWave ? 0 : sim.greenMeter % BALANCE.healCost;
+		sim.yellowMeter += colors[Color.Yellow];
+		if (sim.yellowMeter >= BALANCE.suppressionCost) {
+			sim.suppression = BALANCE.suppressionSeconds;
+			sim.yellowMeter %= BALANCE.suppressionCost;
+			announce(sim, "Supressão: movimento e carga inimiga reduzidos");
+		}
 		noteScore(sim, cascade.score);
 		sim.redMeter += cascade.reds;
-		const rockets = Math.floor(sim.redMeter / 5);
-		sim.redMeter %= 5;
+		const rockets = Math.floor(sim.redMeter / BALANCE.rocketCost);
+		sim.redMeter %= BALANCE.rocketCost;
 		sim.lastChain = cascade.chain;
 		sim.flash = 1;
 		pushSfx(sim, "clear");
@@ -1020,11 +1107,13 @@
 			age: 0,
 			life: .9
 		});
-		planVolley(sim.zombies, cascade.cleared, rockets, sim.rng).forEach((aim, index) => {
+		planVolley(sim.zombies, cascade.cleared, rockets, sim.aimRng).forEach((aim, index) => {
 			sim.bullets.push(makeBullet(aim, index * (aim.kind === "rocket" ? 22 : 12)));
+			sim.stats.fired++;
 		});
 		if (rockets > 0) pushSfx(sim, "rocket");
 		else if (cascade.cleared > 0) pushSfx(sim, "shoot");
+		if (sim.tutorial && colors[Color.Blue] >= 4) endGame(sim, "tutorial");
 	}
 	function lockTower(sim) {
 		const tower = sim.active;
@@ -1100,30 +1189,77 @@
 		for (let i = 0; i < list.length; i++) if (list[i].alive) list[write++] = list[i];
 		list.length = write;
 	}
-	function updateCombat(sim, dt) {
-		if (sim.phase !== "playing") return;
+	function updateWave(sim, dt) {
+		if (sim.rest > 0) {
+			sim.rest = Math.max(0, sim.rest - dt);
+			if (sim.rest === 0) {
+				sim.wave++;
+				sim.waveTime = 0;
+				sim.spawnTimer = 0;
+				sim.waveBudget = Math.min(65, 14 + (sim.wave - 1) * 5);
+				sim.healsThisWave = 0;
+				sim.spawnInterval = Math.max(sim.profile.minInterval, sim.profile.startInterval - (sim.wave - 1) * .15);
+				const tips = { 2: "Corredores: rápidos, mas frágeis", 3: "Tanques: 3 HP e 3 de dano por contato",
+					4: "Atiradores: use azuis para bloquear disparos", 5: "Sabotadores: causam dano e adicionam gemas ao chegar" };
+				announce(sim, `Onda ${sim.wave} · ${tips[sim.wave] || "Segure a linha"}`);
+			}
+			return;
+		}
+		sim.waveTime += dt;
+		// Recovery starts only after threats and their projectiles are gone.
+		if ((sim.waveTime >= BALANCE.waveSeconds || sim.waveBudget < 1) &&
+			!sim.zombies.some(z => z.alive) && !sim.shots.some(s => s.alive)) {
+			sim.rest = BALANCE.restSeconds;
+			announce(sim, "Campo seguro · prepare o tabuleiro para a próxima onda");
+			return;
+		}
+		if (sim.waveTime >= BALANCE.waveSeconds || sim.waveBudget < 1) return;
 		sim.spawnTimer += dt;
 		if (sim.spawnTimer >= sim.spawnInterval) {
 			sim.spawnTimer = 0;
-			sim.zombies.push(createZombie(pickZombieKind(sim.rng), sim.rng, sim.nextId++));
-			sim.spawnInterval = Math.max(SPAWN_MIN, sim.spawnInterval - SPAWN_STEP);
+			const kind = pickZombieKind(sim);
+			if (kind) {
+				sim.zombies.push(createZombie(kind, sim.enemyRng, sim.nextId++));
+				sim.waveBudget -= BALANCE.threatCost[kind];
+			}
 		}
+	}
+	function explodeRocket(sim, bullet) {
+		const cx = bullet.x + bullet.w / 2;
+		const cy = bullet.y + bullet.h / 2;
+		sim.booms.push({ x: cx, y: cy, radius: 70, age: 0, life: .28 });
+		sim.shake = Math.min(1, sim.shake + .35);
+		pushSfx(sim, "explode");
+		for (const zombie of sim.zombies) {
+			if (!zombie.alive || Math.hypot(zombie.x + zombie.w / 2 - cx, zombie.y + zombie.h / 2 - cy) > 70) continue;
+			zombie.hp -= bullet.damage;
+			sim.stats.hits++;
+			if (zombie.hp <= 0) killZombie(sim, zombie);
+		}
+	}
+	function updateCombat(sim, dt) {
+		if (sim.phase !== "playing") return;
+		if (sim.tutorial) return;
+		updateWave(sim, dt);
+		const slow = sim.suppression > 0 ? BALANCE.suppressionFactor : 1;
+		sim.suppression = Math.max(0, sim.suppression - dt);
+		sim.stats.maxShooters = Math.max(sim.stats.maxShooters, sim.zombies.filter(z => z.alive && z.kind === "shooter").length);
 		for (const zombie of sim.zombies) {
 			if (!zombie.alive) continue;
 			if (shooterHolds(zombie)) {
-				zombie.attack += dt;
-				if (zombie.attack >= 2) {
+				zombie.attack += dt * slow;
+				if (zombie.attack >= BALANCE.shooterSeconds) {
 					zombie.attack = 0;
 					const muzzleY = zombie.y + zombie.h / 2;
 					sim.shots.push(makeEnemyShot(zombie.x, muzzleY));
 				}
-			} else zombie.x -= zombie.speed * dt;
+			} else zombie.x -= zombie.speed * dt * slow;
 			if (zombie.x < 42) {
 				const hit = contactOutcome(zombie.kind);
 				zombie.alive = false;
 				if (hit.sabotage) {
 					const column = sim.active?.x ?? -1;
-					dropJunk(sim.board, column, 3, sim.rng);
+					dropJunk(sim.board, column, 3, sim.junkRng);
 					awardCascade(sim, resolveCascade(sim.board));
 					sim.floaters.push({
 						text: "SABOTAGEM",
@@ -1133,7 +1269,7 @@
 						life: 1
 					});
 				}
-				if (hurt(sim, hit.damage)) return;
+				if (hurt(sim, hit.damage, zombie.kind)) return;
 			}
 		}
 		const bulletCount = sim.bullets.length;
@@ -1155,6 +1291,12 @@
 					shot.alive = false;
 					bullet.alive = false;
 					shotDown = true;
+					sim.stats.intercepted++;
+					if (bullet.kind === "rocket") {
+						sim.stats.rocketsIntercepted++;
+						bullet.x = shot.x;
+						explodeRocket(sim, bullet);
+					}
 					sim.booms.push({
 						x: shot.x,
 						y: shot.y,
@@ -1174,26 +1316,9 @@
 			if (!hit) continue;
 			bullet.alive = false;
 			if (bullet.kind === "rocket") {
-				const cx = bullet.x + bullet.w / 2;
-				const cy = bullet.y + bullet.h / 2;
-				sim.booms.push({
-					x: cx,
-					y: cy,
-					radius: 70,
-					age: 0,
-					life: .28
-				});
-				sim.shake = Math.min(1, sim.shake + .35);
-				pushSfx(sim, "explode");
-				for (const zombie of sim.zombies) {
-					if (!zombie.alive) continue;
-					const dx = zombie.x + zombie.w / 2 - cx;
-					const dy = zombie.y + zombie.h / 2 - cy;
-					if (Math.hypot(dx, dy) > 70) continue;
-					zombie.hp -= bullet.damage;
-					if (zombie.hp <= 0) killZombie(sim, zombie);
-				}
+				explodeRocket(sim, bullet);
 			} else {
+				sim.stats.hits++;
 				hit.hp -= bullet.damage;
 				if (hit.hp <= 0) killZombie(sim, hit);
 			}
@@ -1204,7 +1329,7 @@
 			shot.x -= shot.speed * dt;
 			if (shot.x < 42) {
 				shot.alive = false;
-				if (hurt(sim, 1)) return;
+				if (hurt(sim, 1, "shooter")) return;
 			}
 		}
 		compactAlive(sim.zombies);
@@ -1216,10 +1341,12 @@
 		zombie.alive = false;
 		const reward = deathOutcome();
 		noteScore(sim, reward.score);
-		if (reward.sabotage) dropJunk(sim.board, sim.active?.x ?? -1, 3, sim.rng);
+		if (reward.sabotage) dropJunk(sim.board, sim.active?.x ?? -1, 3, sim.junkRng);
 	}
 	function tickFx(sim, dt) {
 		sim.time += dt;
+		sim.shieldFlash = Math.max(0, sim.shieldFlash - dt * 2);
+		sim.stats.maxOccupancy = Math.max(sim.stats.maxOccupancy, sim.board.cells.filter(Boolean).length);
 		sim.shake = Math.max(0, sim.shake - dt * 1.8);
 		sim.flash = Math.max(0, sim.flash - dt * 3);
 		for (const boom of sim.booms) boom.age += dt;
@@ -1234,13 +1361,23 @@
 		if (sim.phase === "playing") tickFx(sim, dt);
 	}
 	function advance(sim, frameDt, actions) {
+		const wasPlaying = sim.phase === "playing";
+		function record() {
+			if (sim.tutorial) return;
+			if (sim.trace.length < 60000) sim.trace.push({ step: sim.steps, dt: Math.min(frameDt, .1), actions: { ...actions, start: false, restart: false, pause: false } });
+			else sim.traceTruncated = true;
+		}
+		if (wasPlaying && !actions.pause) record();
 		applyOneShots(sim, actions);
+		if (sim.phase !== "playing") return;
+		if (!wasPlaying) record();
 		sim.acc += Math.min(frameDt, .1);
 		let steps = 0;
 		while (sim.acc >= .016666666666666666 && steps < 6) {
 			sim.acc -= STEP;
 			steps += 1;
 			tick(sim, STEP, actions);
+			if (sim.phase === "playing") sim.steps++;
 		}
 	}
 	function hudDiamond(sim) {
@@ -1372,7 +1509,7 @@
 		if (!z.alive) return;
 		drawZombieBody(ctx, z);
 		if (z.kind === "shooter") {
-			const charge = Math.min(1, z.attack / 2);
+			const charge = Math.min(1, z.attack / BALANCE.shooterSeconds);
 			ctx.strokeStyle = AMBER;
 			ctx.lineWidth = 2;
 			ctx.beginPath();
@@ -1406,6 +1543,14 @@
 		ctx.fillRect(34, 28, 8, 114);
 		ctx.fillStyle = AMBER;
 		ctx.fillRect(39, 83, 8, 4);
+		if (sim.shield > 0 || sim.shieldFlash > 0) {
+			ctx.fillStyle = `rgba(100,180,255,${.18 + sim.shieldFlash * .5})`;
+			ctx.fillRect(44, 12, 5 + sim.shield * 2, 146);
+		}
+		if (sim.suppression > 0) {
+			ctx.fillStyle = "rgba(226,196,58,.12)";
+			ctx.fillRect(55, 10, 365, 150);
+		}
 		for (const zombie of sim.zombies) drawZombie(ctx, zombie);
 		for (const shot of sim.shots) {
 			if (!shot.alive) continue;
@@ -1488,6 +1633,13 @@
 	}
 	//#endregion
 	//#region src/html/boot.ts
+	// A DOM-free entry point lets tests execute the same simulation as the browser.
+	if (typeof module !== "undefined" && module.exports) {
+		module.exports = { BALANCE, createSim, startGame, startTutorial, advance, updateCombat, updateWave,
+			hurt, awardCascade, resolveCascade, createBoard, createZombie, makeBullet, makeEnemyShot,
+			mulberry32, pickZombieKind, makeGem, hardDrop, spawnTower, rotateTower };
+		return;
+	}
 	const canvas = document.querySelector("#field");
 	const ctx = canvas?.getContext("2d");
 	if (!canvas || !ctx) throw new Error("Canvas #field ausente em index.html");
@@ -1507,14 +1659,51 @@
 	const pauseBtn = must("#pause");
 	const muteBtn = must("#mute");
 	const rules = must("#rules");
+	const difficulty = must("#difficulty");
+	const shieldEl = must("#shield");
+	const blueEl = must("#blue-energy");
+	const healEl = must("#heal");
+	const healLimitEl = must("#heal-limit");
+	const suppressionEl = must("#suppression");
+	const waveEl = must("#wave");
+	const noticeEl = must("#notice");
+	const nextEl = must("#next");
+	const sameSeedBtn = must("#same-seed");
+	const menuBtn = must("#menu");
+	const exportBtn = must("#export");
+	let previewSignature = "";
 	function must(selector) {
 		const node = document.querySelector(selector);
 		if (!node) throw new Error(`Falta ${selector} no index.html`);
 		return node;
 	}
 	function paintHud(live) {
+		shieldEl.textContent = `${live.shield}/${BALANCE.shieldCap}`;
+		blueEl.textContent = live.shield === BALANCE.shieldCap ? "Escudo completo" : `${live.blueMeter}/${BALANCE.shieldCost} azuis`;
+		healEl.textContent = `${live.greenMeter}/${BALANCE.healCost}`;
+		healLimitEl.textContent = live.hp === BALANCE.maxHp ? "Base íntegra" : `${BALANCE.healsPerWave - live.healsThisWave} HP disponíveis nesta onda`;
+		suppressionEl.textContent = live.suppression > 0 ? `${live.suppression.toFixed(1)} s ativa` : `${live.yellowMeter}/${BALANCE.suppressionCost}`;
+		waveEl.textContent = live.tutorial ? "Treino sem inimigos" : live.rest > 0 ? `Recuperação · ${Math.ceil(live.rest)} s` : `Onda ${live.wave} · ${Math.floor(live.time)} s`;
+		const notice = live.time < live.noticeUntil ? live.notice : "Azuis protegem de tiros · verdes reparam · amarelas desaceleram";
+		if (noticeEl.textContent !== notice) noticeEl.textContent = notice;
+		const signature = JSON.stringify(live.nextGems);
+		if (signature !== previewSignature) {
+			previewSignature = signature;
+			nextEl.replaceChildren();
+			const names = ["", "vermelha", "verde", "azul", "amarela", "diamante"];
+			const labels = [];
+			for (const gem of [...(live.nextGems || [])].reverse()) {
+				const node = document.createElement("span");
+				node.style.backgroundColor = GEM_HEX[gem.color];
+				node.textContent = ["", "−", "+", "○", "△", "◇"][gem.color];
+				node.style.outline = gem.crash ? "2px solid white" : "none";
+				labels.push(`${names[gem.color]}${gem.crash ? " com anel" : ""}`);
+				nextEl.append(node);
+			}
+			nextEl.setAttribute("aria-label", `Próxima torre, de cima para baixo: ${labels.join(", ")}`);
+		}
 		hpEl.textContent = String(live.hp);
-		hpBar.style.transform = `scaleX(${live.hp / 10})`;
+		hpBar.style.transform = `scaleX(${live.hp / BALANCE.maxHp})`;
 		scoreEl.textContent = String(live.score);
 		bestEl.textContent = String(live.best);
 		diamondEl.textContent = hudDiamond(live);
@@ -1524,6 +1713,9 @@
 		overlay.hidden = playing;
 		pauseBtn.hidden = !playing;
 		rules.hidden = live.phase !== "title";
+		sameSeedBtn.hidden = live.phase !== "over" || live.tutorial;
+		exportBtn.hidden = live.phase !== "over" || live.tutorial;
+		menuBtn.hidden = live.phase !== "paused" && live.phase !== "over";
 		if (live.phase === "title") {
 			overlayTitle.textContent = "Segure a linha";
 			overlayBody.textContent = "";
@@ -1533,9 +1725,11 @@
 			overlayBody.textContent = "A horda espera. O tabuleiro também.";
 			action.textContent = "Continuar";
 		} else if (live.phase === "over") {
-			overlayTitle.textContent = "A base caiu";
-			overlayBody.textContent = `Pontos ${live.score}. Recorde ${live.best}. Semente ${live.seed}.`;
-			action.textContent = "De novo";
+			overlayTitle.textContent = live.endReason === "tutorial" ? "Escudo carregado!" : live.endReason === "base" ? "Base destruída" : "Tabuleiro bloqueado";
+			const damage = Object.entries(live.stats.damage).map(([kind, n]) => `${enemyLabel(kind)}: ${n}`).join(", ") || "nenhum";
+			overlayBody.textContent = live.endReason === "tutorial" ? "Azuis geram tiros e proteção. O escudo bloqueia disparos automaticamente; inimigos em contato ainda causam dano. Você está pronto para defender a base." :
+				`${Math.floor(live.time)} s · onda ${live.wave} · ${live.score} pontos\nMaior cadeia: ${live.stats.maxChain} · bloqueios: ${live.stats.blocked} · reparos: ${live.stats.healed}\nDano recebido — ${damage}\nSemente: ${live.seed} · ${live.profile.label}`;
+			action.textContent = live.tutorial ? "Entrar na defesa" : "Nova partida";
 		}
 	}
 	function setMuteLabel(muted) {
@@ -1552,8 +1746,27 @@
 	}
 	action.addEventListener("click", () => {
 		if (sim.phase === "paused") tap("pause");
-		else if (sim.phase === "over") tap("restart");
-		else tap("start");
+		else { unlockAudio(); startGame(sim, undefined, difficulty.value); }
+	});
+	must("#tutorial").addEventListener("click", () => { unlockAudio(); startTutorial(sim); });
+	sameSeedBtn.addEventListener("click", () => { unlockAudio(); startGame(sim, sim.seed, sim.mode); });
+	menuBtn.addEventListener("click", () => { input.clear(); sim.phase = "title"; });
+	difficulty.addEventListener("change", () => {
+		sim.mode = difficulty.value;
+		sim.profile = BALANCE.profiles[sim.mode];
+		sim.best = readBest(sim.mode);
+	});
+	exportBtn.addEventListener("click", () => {
+		const report = { version: BALANCE.version, seed: sim.seed, mode: sim.mode, duration: sim.time,
+			wave: sim.wave, reason: sim.endReason, score: sim.score, stats: sim.stats,
+			clearedPerSecond: sim.time ? sim.stats.cleared / sim.time : 0,
+			trace: sim.trace, traceTruncated: sim.traceTruncated };
+		const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }));
+		const link = document.createElement("a");
+		link.href = url;
+		link.download = `puzzle-dead-${sim.seed}.json`;
+		link.click();
+		setTimeout(() => URL.revokeObjectURL(url), 1000);
 	});
 	pauseBtn.addEventListener("click", () => tap("pause"));
 	muteBtn.addEventListener("click", () => tap("mute"));
@@ -1574,7 +1787,15 @@
 		button.addEventListener("pointercancel", () => input.setHold(name, false));
 		button.addEventListener("lostpointercapture", () => input.setHold(name, false));
 	}
-	document.addEventListener("visibilitychange", () => resumeAudio());
+	function autoPause() {
+		input.clear();
+		if (sim.phase === "playing") sim.phase = "paused";
+	}
+	window.addEventListener("blur", autoPause);
+	document.addEventListener("visibilitychange", () => {
+		if (document.hidden) autoPause();
+		else resumeAudio();
+	});
 	let last = performance.now();
 	const loop = (now) => {
 		const dpr = Math.min(window.devicePixelRatio || 1, 2);

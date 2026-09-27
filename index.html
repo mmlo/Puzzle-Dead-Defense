@@ -6,7 +6,6 @@
     <title>Puzzle Dead Defense</title>
     <meta name="description" content="Defenda a base encaixando gemas. Puzzle e cerco no mesmo campo." />
     <meta name="theme-color" content="#12140f" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -189,8 +188,39 @@
       .pad button b { font-size: 1.1rem; line-height: 1; }
       .hint { font-size: 0.875rem; }
       button[hidden] { display: none; }
-      @media (min-width: 768px) {
+      @media (min-width: 768px) and (pointer: fine) {
         .pad { display: none; }
+      }
+      select { background: var(--surface); color: var(--fg); padding: .6rem; border: 1px solid var(--line); border-radius: .4rem; }
+      .powers { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+      .powers .stat { padding: .5rem; }
+      #notice { min-height: 3em; color: var(--fg); }
+      #next { display: flex; flex-direction: column; gap: 2px; }
+      #next span { display: block; width: 1.5rem; height: 1.5rem; text-align: center; line-height: 1.5rem; color: #12140f; font-weight: bold; border-radius: 3px; }
+      .preview-row { align-items: center; }
+      #overlay { overflow-y: auto; }
+      #overlay-body { white-space: pre-line; }
+      .actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+      .actions button { min-height: 2.75rem; }
+      button:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+      @media (max-width: 600px) {
+        .page { padding: .5rem; gap: .35rem; }
+        .kicker { display: none; }
+        h1 { font-size: 1.7rem; }
+        .stats { grid-template-columns: repeat(4, 1fr); gap: .3rem; }
+        .stat { padding: .35rem; }
+        .stat p { font-size: .62rem; letter-spacing: .04em; }
+        .stat strong, .stat span.num { font-size: .9rem; }
+        .stat .hint, .stat small { font-size: .68rem; }
+        .powers .stat { padding: .35rem; }
+        #notice { min-height: 2em; font-size: .75rem; }
+        #next span { width: 1rem; height: 1rem; line-height: 1rem; font-size: .75rem; }
+        .preview-row small, #wave { font-size: .75rem; }
+        .stage { width: min(100%, calc((100svh - 330px) * .7664)); min-width: 200px; margin-inline: auto; }
+        .row > .hint { font-size: .7rem; }
+        .pad { gap: .3rem; }
+        .pad button { font-size: .65rem; }
+        .card { padding: .65rem; }
       }
       @media (prefers-reduced-motion: reduce) {
         .meter i { transition: none; }
@@ -229,6 +259,16 @@
         </div>
       </section>
 
+      <section class="powers" aria-label="Poderes defensivos">
+        <div class="stat"><p>Escudo azul</p><strong id="shield">1/3</strong><small id="blue-energy">0/4 azuis</small></div>
+        <div class="stat"><p>Reparo verde</p><strong id="heal">0/10</strong><small id="heal-limit">Até 2 HP por onda</small></div>
+        <div class="stat"><p>Supressão</p><strong id="suppression">0/6</strong><small>Amarelas · 2 s</small></div>
+      </section>
+      <div class="row preview-row">
+        <div><strong id="wave">Onda 1</strong><p id="notice" class="hint" role="status" aria-live="polite">Prepare a defesa.</p></div>
+        <div><small>Próxima</small><div id="next" aria-label="Próxima torre"></div></div>
+      </div>
+
       <div class="stage">
         <canvas id="field" width="420" height="548" aria-label="Campo de defesa">
           Seu navegador precisa de canvas para jogar.
@@ -239,21 +279,32 @@
             <div id="rules">
               <p>
                 Grupos de 4 estouram. O anel claro estoura a partir de 2. O diamante, a cada 30 torres,
-                apaga a cor em que encostar. Cinco vermelhas armam um foguete.
+                apaga uma cor vizinha (mais contatos; empate: mais gemas no tabuleiro, depois vermelha, verde, azul, amarela).
+                Cada gema eliminada dispara. Os poderes são automáticos.
               </p>
               <ul class="swatches">
-                <li><span class="swatch red"></span><span>Barra<small>vermelha vira foguete</small></span></li>
-                <li><span class="swatch green"></span><span>Cruz<small>grupo comum</small></span></li>
-                <li><span class="swatch blue"></span><span>Círculo<small>grupo comum</small></span></li>
-                <li><span class="swatch yellow"></span><span>Triângulo<small>grupo comum</small></span></li>
+                <li><span class="swatch red"></span><span>Barra<small>5 vermelhas: foguete em área</small></span></li>
+                <li><span class="swatch green"></span><span>Cruz<small>10 verdes: +1 HP; até 2 por onda</small></span></li>
+                <li><span class="swatch blue"></span><span>Círculo<small>4 azuis: bloqueia 1 disparo; até 3 cargas</small></span></li>
+                <li><span class="swatch yellow"></span><span>Triângulo<small>6 amarelas: movimento e carga inimiga pela metade por 2 s</small></span></li>
               </ul>
               <p>
-                O atirador é o alvo prioritário. O tanque tira 3 de vida. O sabotador só suja o tabuleiro se chegar na base.
+                Atiradores chegam na onda 4. Escudos não bloqueiam contato. O tanque tira 3 de vida.
+                Tiros interceptam disparos inimigos; foguetes explodem na interceptação.
+                Cadeias dão +1 de energia azul. Excedentes no teto de escudo ou reparo são descartados.
               </p>
+              <label for="difficulty">Dificuldade</label>
+              <select id="difficulty"><option value="standard">Padrão</option><option value="advanced">Avançado</option></select>
+              <button id="tutorial" class="text-btn" type="button">Treinar combinação azul</button>
             </div>
             <p id="overlay-body"></p>
           </div>
           <button id="action" type="button">Entrar na defesa</button>
+          <div class="actions">
+            <button id="same-seed" class="text-btn" type="button" hidden>Repetir semente</button>
+            <button id="menu" class="text-btn" type="button" hidden>Menu</button>
+            <button id="export" class="text-btn" type="button" hidden>Baixar diagnóstico</button>
+          </div>
         </div>
       </div>
 
@@ -270,6 +321,7 @@
         <button id="pause" class="text-btn" type="button" hidden>Pausa</button>
       </div>
     </main>
+    <script src="balance.js"></script>
     <script src="game.js"></script>
   </body>
 </html>

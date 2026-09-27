@@ -1,0 +1,15 @@
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const game = require('../game.js');
+if (!process.argv[2]) throw new Error('Uso: node scripts/replay.cjs diagnostico.json');
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+assert.equal(report.version, game.BALANCE.version, 'Versão de balanceamento diferente');
+assert.equal(report.traceTruncated, false, 'Registro incompleto: não é possível reproduzir a partida inteira');
+assert.ok(Array.isArray(report.trace) && report.trace.length <= 60000, 'Registro inválido');
+const sim = game.createSim(report.seed, 0);
+game.startGame(sim, report.seed, report.mode);
+for (const entry of report.trace) game.advance(sim, entry.dt, entry.actions);
+assert.equal(sim.score, report.score, 'Pontuação divergente');
+assert.equal(sim.endReason, report.reason, 'Causa de encerramento divergente');
+assert.deepEqual(sim.stats, report.stats, 'Estatísticas divergentes');
+console.log(JSON.stringify({ reproduced: true, seed: sim.seed, mode: sim.mode, score: sim.score, reason: sim.endReason, duration: sim.time }, null, 2));
